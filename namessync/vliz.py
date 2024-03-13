@@ -35,7 +35,7 @@ class VlizSession:
         results = []
 
         while True:
-            url = os.getenv("VLIZ_ENDPOINT") + f"/annotated_lists?itemsPerPage=1000&page={page}"
+            url = os.getenv("VLIZ_ENDPOINT") + f"/annotated-lists?itemsPerPage=1000&page={page}"
             token = self.token["token"]
             res = requests.get(url, headers={"Authorization": f"Bearer {token}"})
             res.raise_for_status()
@@ -48,7 +48,7 @@ class VlizSession:
         return results
 
     def add_annotated_list(self, item: dict):
-        url = os.getenv("VLIZ_ENDPOINT") + "/annotated_lists"
+        url = os.getenv("VLIZ_ENDPOINT") + "/annotated-lists"
         token = self.token["token"]
         res = requests.post(url, headers={"Authorization": f"Bearer {token}"}, json=item)
         res.raise_for_status()
