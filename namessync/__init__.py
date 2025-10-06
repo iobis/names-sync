@@ -1,4 +1,4 @@
-from namessync.obis import fetch_nonmatching
+from namessync.obis import fetch_nonmatching_parquet
 from namessync.vliz import AlreadyExistsException, VlizSession
 import logging
 from termcolor import colored
@@ -22,30 +22,31 @@ def check_name_has_exact_match(scientificname: str, scientificnameauthorship: st
     return False
 
 
-def sync_to_vliz(max_items=10, dry_run=False):
+def sync_to_vliz(max_items=None, dry_run=False, overwrite=True):
     session = VlizSession()
-    annotated_list = session.fetch_annotated_list()
-    non_matching = fetch_nonmatching()
+    non_matching = fetch_nonmatching_parquet()
 
     # create annotated list map based on name and authorship
 
     annotated_map = {}
-    for item in annotated_list:
-        key = (item["scientificName"].strip() if item["scientificName"] is not None else "") + "|" + (item["scientificNameAuthorship"].strip() if item["scientificNameAuthorship"] is not None else "")
-        if key in annotated_map:
-            annotated_map[key].append(item)
-        else:
-            annotated_map[key] = [item]
+    if not overwrite:
+        annotated_list = session.fetch_annotated_list()
+        for item in annotated_list:
+            key = (item["scientificName"].strip() if item["scientificName"] is not None else "") + "|" + (item["scientificNameAuthorship"].strip() if item["scientificNameAuthorship"] is not None else "")
+            if key in annotated_map:
+                annotated_map[key].append(item)
+            else:
+                annotated_map[key] = [item]
 
     # check non matching names against annotated list
 
     for item in non_matching:
-        key = (item["scientificname"].strip() if item["scientificname"] is not None else "") + "|" + (item["scientificnameauthorship"].strip() if item["scientificnameauthorship"] is not None else "")
-        if key in annotated_map:
+        key = (item["scientificName"].strip() if item["scientificName"] is not None else "") + "|" + (item["scientificNameAuthorship"].strip() if item["scientificNameAuthorship"] is not None else "")
+        if (not overwrite) and key in annotated_map:
             logger.debug(f"Key {key} already in annotated list")
         else:
             try:
-                has_exact_match = check_name_has_exact_match(item["scientificname"], item["scientificnameauthorship"])
+                has_exact_match = check_name_has_exact_match(item["scientificName"], item["scientificNameAuthorship"])
             except Exception:
                 logger.error(colored(f"Error while querying WoRMS for {key}", "red"))
                 continue
@@ -54,15 +55,17 @@ def sync_to_vliz(max_items=10, dry_run=False):
             else:
                 logger.info(colored(f">>> Trying to add {key} to the annotated list", "yellow"))
                 data = {
-                    "scientificName": item["scientificname"],
-                    "scientificNameAuthorship": item["scientificnameauthorship"],
+                    "scientificName": item["scientificName"],
+                    "scientificNameAuthorship": item["scientificNameAuthorship"],
                     "phylum": item["phylum"],
                     "class": item["class"],
                     "order": item["order"],
                     "family": item["family"],
                     "genus": item["genus"],
                     "recordCount": int(item["records"]),
-                    "datasets": [{"uuid": d.split(";")[0], "url": d.split(";")[1]} for d in item["datasets"].split("|")]
+                    "datasetUuid": item["dataset"],
+                    "datasetUrl": "https://obis.org/dataset/" + item["dataset"],
+                    "node": item["node"][0]
                 }
                 if not dry_run:
                     try:

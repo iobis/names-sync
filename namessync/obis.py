@@ -6,6 +6,7 @@ import tempfile
 import csv
 from diskcache import Cache
 import logging
+import duckdb
 
 
 logger = logging.getLogger("namessync")
@@ -64,6 +65,38 @@ names_query = """
 """
 
 
+def fetch_nonmatching_parquet():
+    """Fetch non matching names from the OBIS parquet dataset."""
+
+    conn = duckdb.connect()
+    df = conn.execute("""
+        select
+            source.scientificName as scientificName,
+            source.scientificNameAuthorship as scientificNameAuthorship,
+            source.scientificNameID as scientificNameID,
+            source.genus as genus,
+            source.family as family,
+            source.order as order,
+            source.class as class,
+            source.phylum as phylum,
+            count(*) as records,
+            first(dataset_id) as dataset,
+            first(node_ids) as node
+        from read_parquet('/Volumes/acasis/occurrence/*.parquet', union_by_name = true)
+        where interpreted.aphiaid is null and source.scientificNameID not ilike '%marinespecies%'
+        group by
+            source.scientificName,
+            source.scientificNameAuthorship,
+            source.scientificNameID,
+            source.genus,
+            source.family,
+            source.order,
+            source.class,
+            source.phylum
+    """).fetchdf()
+    return df.to_dict("records")
+
+
 def fetch_nonmatching():
     """Fetch non matching names from the OBIS database. Cached locally for one day."""
 
@@ -72,7 +105,14 @@ def fetch_nonmatching():
         logger.info("Fetching non matching names from local cache")
     else:
         logger.info("Fetching non matching names from database")
-        conn = psycopg2.connect("host='%s' dbname='%s' user='%s' password='%s'" % (os.environ["DB_HOST"], os.environ["DB_DB"], os.environ["DB_USER"], os.environ["DB_PASSWORD"]))
+        conn = psycopg2.connect(
+            "host='%s' dbname='%s' user='%s' password='%s' options='-c statement_timeout=7200s'" % (os.environ["DB_HOST"], os.environ["DB_DB"], os.environ["DB_USER"], os.environ["DB_PASSWORD"]),
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=5,
+            application_name="namessync"
+        )
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         cur.execute(names_query)
         rows = cur.fetchall()
