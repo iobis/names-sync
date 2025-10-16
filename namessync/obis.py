@@ -70,7 +70,13 @@ def fetch_nonmatching_parquet():
 
     conn = duckdb.connect()
     df = conn.execute("""
+        with ranked_records as (
         select
+            dataset_id,
+            coalesce(
+                list_filter(node_ids, x -> x != '4bf79a01-65a9-4db6-b37b-18434f26ddfc')[1], -- EurOBIS last
+                node_ids[1]
+            ) as node_id,
             source.scientificName as scientificName,
             source.scientificNameAuthorship as scientificNameAuthorship,
             source.scientificNameID as scientificNameID,
@@ -80,11 +86,23 @@ def fetch_nonmatching_parquet():
             source.class as class,
             source.phylum as phylum,
             count(*) as records,
-            first(dataset_id) as dataset,
-            first(node_ids) as node
+            row_number() over (
+            partition by
+                dataset_id,
+                coalesce(
+                    list_filter(node_ids, x -> x != '4bf79a01-65a9-4db6-b37b-18434f26ddfc')[1],
+                    node_ids[1]
+                ),
+                source.scientificName,
+                source.scientificNameAuthorship,
+                source.phylum
+            order by count(*) desc
+            ) as rn
         from read_parquet('/Volumes/acasis/occurrence/*.parquet', union_by_name = true)
-        where interpreted.aphiaid is null and source.scientificNameID not ilike '%marinespecies%'
+        where interpreted.AphiaID is null and (source.scientificNameID is null or source.scientificNameID not ilike '%marinespecies%') and source.scientificName is not null
         group by
+            dataset_id,
+            node_id,
             source.scientificName,
             source.scientificNameAuthorship,
             source.scientificNameID,
@@ -93,6 +111,21 @@ def fetch_nonmatching_parquet():
             source.order,
             source.class,
             source.phylum
+        )
+        select
+            dataset_id as dataset,
+            node_id as node,
+            scientificName,
+            scientificNameAuthorship,
+            scientificNameID,
+            genus,
+            family,
+            ranked_records.order,
+            class,
+            phylum,
+            records
+        from ranked_records
+        where rn = 1
     """).fetchdf()
     return df.to_dict("records")
 

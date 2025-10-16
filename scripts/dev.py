@@ -5,8 +5,8 @@ import logging
 
 
 logging.basicConfig(level="INFO")
-requests_cache.install_cache("vliz_cache")
+# requests_cache.install_cache("vliz_cache")
 load_dotenv()
 
 
-sync_to_vliz(dry_run=False, max_items=10)
+sync_to_vliz(dry_run=False, max_items=None, overwrite=True)

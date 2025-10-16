@@ -5,6 +5,7 @@ from termcolor import colored
 import pyworms
 import urllib.parse
 from datetime import datetime
+import requests
 
 
 logger = logging.getLogger("namessync")
@@ -25,6 +26,12 @@ def check_name_has_exact_match(scientificname: str, scientificnameauthorship: st
 def sync_to_vliz(max_items=None, dry_run=False, overwrite=True):
     session = VlizSession()
     non_matching = fetch_nonmatching_parquet()
+    count = 0
+
+    # create nodes map
+
+    res = requests.get("https://api.obis.org/node")
+    nodes_map = {r["id"]: r["name"] for r in res.json()["results"]}
 
     # create annotated list map based on name and authorship
 
@@ -41,19 +48,23 @@ def sync_to_vliz(max_items=None, dry_run=False, overwrite=True):
     # check non matching names against annotated list
 
     for item in non_matching:
+        if item["scientificName"] == "NA" or item["scientificName"] == "Unknown" or item["scientificName"] == "0" or "?" in item["scientificName"]:
+            logger.info(f"Skipping, scientificName equals {item['scientificName']}")
+            continue
         key = (item["scientificName"].strip() if item["scientificName"] is not None else "") + "|" + (item["scientificNameAuthorship"].strip() if item["scientificNameAuthorship"] is not None else "")
         if (not overwrite) and key in annotated_map:
             logger.debug(f"Key {key} already in annotated list")
         else:
             try:
                 has_exact_match = check_name_has_exact_match(item["scientificName"], item["scientificNameAuthorship"])
-            except Exception:
-                logger.error(colored(f"Error while querying WoRMS for {key}", "red"))
+            except Exception as e:
+                logger.error(colored(f"Error while querying WoRMS for {key}: {e}", "red"))
                 continue
             if has_exact_match:
                 logger.info(colored(f">>> Key {key} has exact match in WoRMS, skipping", "grey"))
             else:
                 logger.info(colored(f">>> Trying to add {key} to the annotated list", "yellow"))
+                count = count + 1
                 data = {
                     "scientificName": item["scientificName"],
                     "scientificNameAuthorship": item["scientificNameAuthorship"],
@@ -65,12 +76,12 @@ def sync_to_vliz(max_items=None, dry_run=False, overwrite=True):
                     "recordCount": int(item["records"]),
                     "datasetUuid": item["dataset"],
                     "datasetUrl": "https://obis.org/dataset/" + item["dataset"],
-                    "node": item["node"][0]
+                    "node": nodes_map[item["node"]]
                 }
                 if not dry_run:
                     try:
                         session.add_annotated_list(data)
-                        logger.info(colored(f"    Added {key} to the annotated list", "green"))
+                        logger.info(colored(f"    Added {key} to the annotated list ({count} so far)", "green"))
 
                         if max_items is not None:
                             max_items = max_items - 1
